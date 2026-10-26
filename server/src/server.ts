@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDB } from './config/db';
+import uploadRoutes from './routes/upload';
 
 dotenv.config();
 
@@ -18,6 +19,9 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// API Routes
+app.use('/api/upload', uploadRoutes);
 
 // Basic health check route
 app.get('/api/health', (req, res) => {
