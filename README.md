@@ -11,7 +11,7 @@
 ## 📂 Project Structure
 ```text
 ├── assets/
-├── src/
+├── mobile/
 │   ├── app/                # Expo Router (Tabs, Restaurant, Food, Checkout, Chat, Tracking)
 │   ├── components/         # Common, Cards, Map, Chat UI Components
 │   ├── stores/             # Zustand state management

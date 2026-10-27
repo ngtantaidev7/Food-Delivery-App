@@ -7,6 +7,8 @@ import { Restaurant } from './models/Restaurant';
 import { Category } from './models/Category';
 import { Food } from './models/Food';
 import { Voucher } from './models/Voucher';
+import { Banner } from './models/Banner';
+import { RestaurantReview } from './models/RestaurantReview';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
@@ -29,6 +31,8 @@ const seedDatabase = async () => {
       Category.deleteMany({}),
       Food.deleteMany({}),
       Voucher.deleteMany({}),
+      Banner.deleteMany({}),
+      RestaurantReview.deleteMany({}),
     ]);
 
     // 2. Tạo Người dùng mẫu (Khách hàng & Tài xế chuẩn UI)
@@ -341,7 +345,7 @@ const seedDatabase = async () => {
     const now = new Date();
     const futureDate = new Date(now.setMonth(now.getMonth() + 6));
 
-    await Voucher.create([
+    const vouchers = await Voucher.create([
       {
         title: '- 10%',
         type: 'percentage',
@@ -387,12 +391,47 @@ const seedDatabase = async () => {
       },
     ]);
 
+    // 7. Tạo Banners quảng cáo (Trang 1 và Trang 2)
+    console.log('🖼️ Đang tạo Banners...');
+    const banners = await Banner.create([
+      {
+        title: 'Join Party',
+        subtitle: 'Special food party with huge discounts',
+        dealText: '$1',
+        buttonText: 'SEE MORE',
+        imageUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=800&q=80',
+        placement: 'home',
+        order: 1,
+        isActive: true,
+      },
+      {
+        title: 'Tasty Dishes',
+        subtitle: 'Delicious fast food combos near you',
+        imageUrl: 'https://images.unsplash.com/photo-1561758033-d89a9ad46330?auto=format&fit=crop&w=800&q=80',
+        placement: 'category',
+        categorySlug: 'fast-food',
+        order: 1,
+        isActive: true,
+      },
+    ]);
+
+    // 8. Tạo Đánh giá nhà hàng mẫu (Trang 4 - Jinny Oslin 5★)
+    console.log('⭐ Đang tạo Restaurant Review mẫu...');
+    await RestaurantReview.create({
+      restaurantId: hanaChicken._id,
+      customerId: customer._id,
+      ratingStars: 5,
+      comment: 'Quick delivery, good dishes. I love the chicken burger.',
+    });
+
     console.log('🎉 SEED DỮ LIỆU THÀNH CÔNG VÀO MONGODB ATLAS!');
     console.log(`- 2 Users (Khách hàng & Tài xế ${driver.fullName})`);
     console.log(`- ${categories.length} Danh mục ẩm thực`);
     console.log(`- ${restaurants.length} Nhà hàng (Kèm toạ độ GeoJSON)`);
     console.log(`- 8 Món ăn & Combos (Kèm Sizes, Toppings, Cay)`);
-    console.log(`- 5 Vouchers chuẩn Trang 6 PDF`);
+    console.log(`- ${vouchers.length} Vouchers chuẩn Trang 6 PDF`);
+    console.log(`- ${banners.length} Banners khuyến mãi (Home & Category)`);
+    console.log(`- 1 Restaurant Review chuẩn Trang 4 PDF`);
 
     process.exit(0);
   } catch (error) {
