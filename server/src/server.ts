@@ -5,11 +5,14 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 
+// dotenv MUST be loaded before any module that reads process.env
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import { connectDB } from './config/db';
 import { Message } from './models/Message';
 import { Order } from './models/Order';
 
-// Import Routes
+// Routes
 import uploadRoutes from './routes/upload';
 import userRoutes from './routes/userRoutes';
 import categoryRoutes from './routes/categoryRoutes';
@@ -21,21 +24,19 @@ import orderRoutes from './routes/orderRoutes';
 import messageRoutes from './routes/messageRoutes';
 import reviewRoutes from './routes/reviewRoutes';
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  },
+  cors: { origin: '*', methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+  pingTimeout: 60000,
 });
 
+// ── Global Middleware ──────────────────────────────────────────────────────────
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-// API Routes
+// ── REST API Routes ────────────────────────────────────────────────────────────
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
@@ -47,32 +48,43 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/reviews', reviewRoutes);
 
-// Basic health check route
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Food Delivery API is running',
-    timestamp: new Date().toISOString(),
+// ── Health Check ───────────────────────────────────────────────────────────────
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', message: 'Food Delivery API is running', timestamp: new Date().toISOString() });
+});
+
+// ── 404 Handler ────────────────────────────────────────────────────────────────
+app.use((_req, res) => {
+  res.status(404).json({ success: false, message: 'Route not found' });
+});
+
+// ── Global Error Handler ───────────────────────────────────────────────────────
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled Server Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal Server Error',
   });
 });
 
-// Socket.io for Realtime chat & Driver Tracking
+// ── Socket.IO — Realtime Chat & Driver Tracking ────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`⚡ Client connected: ${socket.id}`);
 
-  // Join order room for tracking and chat
+  /** Join a per-order room for both chat and tracking */
   socket.on('join_order_room', (orderId: string) => {
     socket.join(orderId);
-    console.log(`Socket ${socket.id} joined room ${orderId}`);
   });
 
-  // Leave order room
+  /** Leave order room on explicit request */
   socket.on('leave_order_room', (orderId: string) => {
     socket.leave(orderId);
-    console.log(`Socket ${socket.id} left room ${orderId}`);
   });
 
-  // Send message - saves directly to MongoDB & broadcasts
+  /**
+   * Chat message: persist to MongoDB first, then broadcast to room.
+   * Ensures message history is never lost even if a client disconnects.
+   */
   socket.on('send_message', async (data: {
     orderId: string;
     senderId: string;
@@ -96,43 +108,57 @@ io.on('connection', (socket) => {
 
       io.to(data.orderId).emit('receive_message', populated);
     } catch (err) {
-      console.error('Socket send_message error:', err);
+      console.error('[socket] send_message error:', err);
+      socket.emit('error', { message: 'Failed to send message' });
     }
   });
 
-  // Driver GPS location update - broadcasts to customer in order room
+  /**
+   * Driver GPS update — broadcast location + heading + ETA to order room.
+   * Only the customer tracking screen listens for this event.
+   */
   socket.on('driver_location_update', (data: {
     orderId: string;
-    coordinates: [number, number]; // [longitude, latitude]
+    coordinates: [number, number]; // [lng, lat]
     heading?: number;
     etaMinutes?: number;
   }) => {
     io.to(data.orderId).emit('driver_location_changed', data);
   });
 
-  // Order status transition broadcast
+  /**
+   * Order status change — persist to DB and broadcast updated order.
+   * Used by the status stepper on both customer and driver side.
+   */
   socket.on('order_status_update', async (data: { orderId: string; status: string }) => {
     try {
-      const order = await Order.findByIdAndUpdate(data.orderId, { status: data.status }, { new: true })
-        .populate('restaurantId')
-        .populate('driverId');
+      const order = await Order.findByIdAndUpdate(
+        data.orderId,
+        { status: data.status },
+        { new: true }
+      )
+        .populate('restaurantId', 'name imageUrl address')
+        .populate('driverId', 'fullName phone avatarUrl');
 
-      io.to(data.orderId).emit('order_status_changed', order);
+      if (order) {
+        io.to(data.orderId).emit('order_status_changed', order);
+      }
     } catch (err) {
-      console.error('Socket order_status_update error:', err);
+      console.error('[socket] order_status_update error:', err);
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`❌ Client disconnected: ${socket.id}`);
+  socket.on('disconnect', (reason) => {
+    console.log(`❌ Client disconnected: ${socket.id} (${reason})`);
   });
 });
 
+// ── Start Server ───────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(() => {
   server.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Server running → http://localhost:${PORT}`);
   });
 });
 

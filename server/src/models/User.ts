@@ -44,6 +44,7 @@ const UserSchema = new Schema<IUser>(
 );
 
 UserSchema.index({ 'addresses.location': '2dsphere' });
+UserSchema.index({ role: 1 });
 
 export const User = model<IUser>('User', UserSchema);
 export default User;

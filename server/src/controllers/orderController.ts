@@ -2,31 +2,32 @@ import { Request, Response } from 'express';
 import { Order } from '../models/Order';
 import { User } from '../models/User';
 
-// Create a new order (Page 8 - Order review / Checkout)
+const ORDER_POPULATE = [
+  { path: 'restaurantId', select: 'name imageUrl address' },
+  { path: 'driverId', select: 'fullName phone avatarUrl' },
+  { path: 'voucherApplied', select: 'title type discountValue' },
+] as const;
+
+const VALID_STATUSES = [
+  'confirm_order', 'look_for_driver', 'prepare_food', 'deliver', 'arrived', 'cancelled',
+] as const;
+type OrderStatus = (typeof VALID_STATUSES)[number];
+
+/** POST /api/orders — Create order (Page 8 checkout) */
 export const createOrder = async (req: Request, res: Response): Promise<void> => {
   try {
-    const {
-      customerId,
-      restaurantId,
-      items,
-      pricing,
-      voucherApplied,
-      deliveryAddress,
-      paymentMethod = 'E-wallet',
-    } = req.body;
+    const { customerId, restaurantId, items, pricing, voucherApplied, deliveryAddress, paymentMethod = 'E-wallet' } = req.body;
 
-    // Fallback to first customer if customerId is not passed in demo
-    let finalCustomerId = customerId;
-    if (!finalCustomerId) {
-      const defaultCustomer = await User.findOne({ role: 'customer' });
-      finalCustomerId = defaultCustomer?._id;
-    }
-
-    // Assign John Cooper as driver by default for tracking and chat flow
-    const driver = await User.findOne({ role: 'driver', fullName: 'John Cooper' }) || await User.findOne({ role: 'driver' });
+    // Resolve customer & driver concurrently
+    const [customer, driver] = await Promise.all([
+      customerId ? User.findById(customerId) : User.findOne({ role: 'customer' }),
+      User.findOne({ role: 'driver', fullName: 'John Cooper' }).then(
+        (d) => d ?? User.findOne({ role: 'driver' })
+      ),
+    ]);
 
     const order = await Order.create({
-      customerId: finalCustomerId,
+      customerId: customer?._id ?? customerId,
       restaurantId,
       driverId: driver?._id,
       items,
@@ -38,49 +39,41 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       paymentStatus: paymentMethod === 'Cash' ? 'pending' : 'completed',
     });
 
-    const populatedOrder = await Order.findById(order._id)
-      .populate('restaurantId')
-      .populate('driverId')
-      .populate('voucherApplied');
-
-    res.status(201).json({ success: true, data: populatedOrder });
+    const populated = await Order.findById(order._id).populate(ORDER_POPULATE as any);
+    res.status(201).json({ success: true, data: populated });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get single order detail (Page 9, 10)
+/** GET /api/orders/:id — Order detail (Page 9, 10) */
 export const getOrderById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const order = await Order.findById(id)
-      .populate('restaurantId')
-      .populate('driverId', 'fullName phone avatarUrl')
-      .populate('voucherApplied');
-
+    const order = await Order.findById(req.params.id).populate(ORDER_POPULATE as any);
     if (!order) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
     }
-
     res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get all orders for a customer ("My order" tab)
+/** GET /api/orders/user/:customerId — Customer order history */
 export const getUserOrders = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { customerId } = req.params;
-    let queryCustomerId = customerId;
-
-    if (!queryCustomerId || queryCustomerId === 'current') {
-      const defaultCustomer = await User.findOne({ role: 'customer' });
-      queryCustomerId = defaultCustomer?._id?.toString() || '';
+    let { customerId } = req.params;
+    if (!customerId || customerId === 'current') {
+      const defaultCustomer = await User.findOne({ role: 'customer' }, '_id');
+      customerId = defaultCustomer?._id?.toString() ?? '';
+    }
+    if (!customerId) {
+      res.status(400).json({ success: false, message: 'customerId is required' });
+      return;
     }
 
-    const orders = await Order.find({ customerId: queryCustomerId })
+    const orders = await Order.find({ customerId })
       .populate('restaurantId', 'name imageUrl address')
       .populate('driverId', 'fullName phone avatarUrl')
       .sort({ createdAt: -1 });
@@ -91,60 +84,52 @@ export const getUserOrders = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// Update order status (Page 9 - stepper)
+/** PATCH /api/orders/:id/status — Status stepper (Page 9) */
 export const updateOrderStatus = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const { status, driverId } = req.body;
+    const { status, driverId } = req.body as { status: OrderStatus; driverId?: string };
 
-    const validStatuses = ['confirm_order', 'look_for_driver', 'prepare_food', 'deliver', 'arrived', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      res.status(400).json({ success: false, message: 'Invalid status' });
+    if (!VALID_STATUSES.includes(status)) {
+      res.status(400).json({ success: false, message: `Invalid status. Valid values: ${VALID_STATUSES.join(', ')}` });
       return;
     }
 
-    const updateData: any = { status };
-    if (driverId) {
-      updateData.driverId = driverId;
-    }
+    const update: Record<string, any> = { status };
+    if (driverId) update.driverId = driverId;
 
-    const order = await Order.findByIdAndUpdate(id, updateData, { new: true })
-      .populate('restaurantId')
+    const order = await Order.findByIdAndUpdate(req.params.id, update, { new: true })
+      .populate('restaurantId', 'name imageUrl address')
       .populate('driverId', 'fullName phone avatarUrl');
 
     if (!order) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
     }
-
     res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Cancel order (Page 9 - Cancel button)
+/** POST /api/orders/:id/cancel — Cancel order (Page 9) */
 export const cancelOrder = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const order = await Order.findById(id);
-
+    const order = await Order.findById(req.params.id);
     if (!order) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
     }
-
     if (order.status === 'deliver' || order.status === 'arrived') {
-      res.status(400).json({
-        success: false,
-        message: 'Cannot cancel order once food is out for delivery',
-      });
+      res.status(400).json({ success: false, message: 'Cannot cancel order once food is out for delivery' });
+      return;
+    }
+    if (order.status === 'cancelled') {
+      res.status(400).json({ success: false, message: 'Order is already cancelled' });
       return;
     }
 
     order.status = 'cancelled';
     await order.save();
-
     res.json({ success: true, message: 'Order cancelled successfully', data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

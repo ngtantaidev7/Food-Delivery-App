@@ -1,40 +1,32 @@
 import { Request, Response } from 'express';
 import { Food } from '../models/Food';
-import { Restaurant } from '../models/Restaurant';
 
-// Search foods and group by restaurant (Page 3)
+/** GET /api/foods/search?q=...&tag=...
+ *  Finds foods matching the query and groups results by restaurant.
+ *  Page 3: search "Fried Chicken" → Hana Chicken with matching items listed beneath.
+ */
 export const searchFoods = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { q, tag } = req.query;
-    const searchString = typeof q === 'string' ? q.trim() : '';
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const tag = typeof req.query.tag === 'string' ? req.query.tag : undefined;
 
-    const foodFilter: any = { isAvailable: true };
-    if (searchString) {
-      foodFilter.name = { $regex: searchString, $options: 'i' };
-    }
+    const filter: Record<string, any> = { isAvailable: true };
+    if (q) filter.name = { $regex: q, $options: 'i' };
 
-    // Find all matching foods and populate restaurant
-    const foods = await Food.find(foodFilter).populate('restaurantId');
+    const foods = await Food.find(filter).populate('restaurantId');
 
-    // Group foods by restaurant
-    const restaurantMap = new Map<string, { restaurant: any; items: any[] }>();
-
+    // Group by restaurant using a Map for O(n) performance
+    const map = new Map<string, { restaurant: any; items: any[] }>();
     for (const food of foods) {
       const rest = food.restaurantId as any;
       if (!rest) continue;
+      if (tag && !rest.tags?.includes(tag)) continue;
 
-      if (tag && !rest.tags?.includes(tag)) {
-        continue;
+      const key = rest._id.toString();
+      if (!map.has(key)) {
+        map.set(key, { restaurant: rest, items: [] });
       }
-
-      const restId = rest._id.toString();
-      if (!restaurantMap.has(restId)) {
-        restaurantMap.set(restId, {
-          restaurant: rest,
-          items: [],
-        });
-      }
-      restaurantMap.get(restId)!.items.push({
+      map.get(key)!.items.push({
         _id: food._id,
         name: food.name,
         basePrice: food.basePrice,
@@ -43,24 +35,20 @@ export const searchFoods = async (req: Request, res: Response): Promise<void> =>
       });
     }
 
-    const groupedResults = Array.from(restaurantMap.values());
+    const groupedResults = Array.from(map.values());
 
-    res.json({
-      success: true,
-      query: searchString,
-      totalCount: foods.length,
-      groupedResults,
-    });
+    res.json({ success: true, query: q, totalCount: foods.length, groupedResults });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get food details with options (Page 5)
+/** GET /api/foods/:id — food detail with sizes, toppings, spiciness (Page 5) */
 export const getFoodById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const food = await Food.findById(id).populate('restaurantId', 'name address imageUrl');
+    const food = await Food.findById(req.params.id)
+      .populate('restaurantId', 'name address imageUrl openTime closeTime')
+      .populate('categoryId', 'name slug');
 
     if (!food) {
       res.status(404).json({ success: false, message: 'Food item not found' });

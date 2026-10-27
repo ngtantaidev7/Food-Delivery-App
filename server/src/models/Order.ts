@@ -87,6 +87,8 @@ const OrderSchema = new Schema<IOrder>(
 );
 
 OrderSchema.index({ customerId: 1, status: 1 });
+OrderSchema.index({ driverId: 1, status: 1 });
+OrderSchema.index({ restaurantId: 1 });
 
 export const Order = model<IOrder>('Order', OrderSchema);
 export default Order;

@@ -4,47 +4,30 @@ import { Food } from '../models/Food';
 import { RestaurantReview } from '../models/RestaurantReview';
 import { Voucher } from '../models/Voucher';
 
-// Get list of restaurants with filtering and tags
+/** GET /api/restaurants — list with tag / categoryId / search / sort / limit */
 export const getRestaurants = async (req: Request, res: Response): Promise<void> => {
   try {
     const { tag, categoryId, search, sortBy, limit } = req.query;
 
-    const filter: any = {};
+    const filter: Record<string, any> = {};
+    if (tag) filter.tags = { $in: [tag] };
+    if (search) filter.name = { $regex: search, $options: 'i' };
 
-    if (tag) {
-      // Tags like 'Freeship', 'Near you', 'Deal $1', 'Popular'
-      filter.tags = { $in: [tag] };
-    }
-
-    if (search) {
-      filter.name = { $regex: search, $options: 'i' };
-    }
-
-    let query = Restaurant.find(filter);
-
-    if (sortBy === 'rating') {
-      query = query.sort({ ratingAverage: -1 });
-    } else if (sortBy === 'reviews') {
-      query = query.sort({ totalReviews: -1 });
-    } else {
-      query = query.sort({ createdAt: -1 });
-    }
-
-    if (limit) {
-      query = query.limit(Number(limit));
-    }
-
-    const restaurants = await query.exec();
-
-    // If categoryId is specified, optionally filter restaurants that have foods in that category
+    // If categoryId is given, find distinct restaurantIds that carry that category
     if (categoryId) {
-      const foodsInCategory = await Food.find({ categoryId }).distinct('restaurantId');
-      const filtered = restaurants.filter((r) =>
-        foodsInCategory.some((fId) => fId.toString() === r._id.toString())
-      );
-      res.json({ success: true, count: filtered.length, data: filtered });
-      return;
+      const restaurantIds = await Food.find({ categoryId }).distinct('restaurantId');
+      filter._id = { $in: restaurantIds };
     }
+
+    const sortMap: Record<string, Record<string, 1 | -1>> = {
+      rating: { ratingAverage: -1 },
+      reviews: { totalReviews: -1 },
+    };
+    const sort = sortMap[sortBy as string] ?? { createdAt: -1 };
+
+    const restaurants = await Restaurant.find(filter)
+      .sort(sort)
+      .limit(limit ? Number(limit) : 0);
 
     res.json({ success: true, count: restaurants.length, data: restaurants });
   } catch (error: any) {
@@ -52,100 +35,54 @@ export const getRestaurants = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// Get single restaurant detail (Page 4)
+/** GET /api/restaurants/:id — restaurant detail + top 2 active vouchers */
 export const getRestaurantById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const restaurant = await Restaurant.findById(id);
-
+    const restaurant = await Restaurant.findById(req.params.id);
     if (!restaurant) {
       res.status(404).json({ success: false, message: 'Restaurant not found' });
       return;
     }
 
-    // Also get active vouchers for this restaurant or general
-    const vouchers = await Voucher.find({ isActive: true }).limit(2);
+    const [vouchers, reviewCount] = await Promise.all([
+      Voucher.find({ isActive: true }).limit(2),
+      RestaurantReview.countDocuments({ restaurantId: req.params.id }),
+    ]);
 
-    res.json({
-      success: true,
-      data: {
-        ...restaurant.toObject(),
-        vouchers,
-      },
-    });
+    res.json({ success: true, data: { ...restaurant.toObject(), vouchers, reviewCount } });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get menu of restaurant grouped into sections (For you, Menu, Combo)
+/** GET /api/restaurants/:id/menu  (also aliased to /foods) */
 export const getRestaurantMenu = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const foods = await Food.find({ restaurantId: id, isAvailable: true }).populate('categoryId');
+    const foods = await Food.find({ restaurantId: req.params.id, isAvailable: true })
+      .populate('categoryId', 'name slug');
 
-    // Split foods into sections matching Page 4 UI:
-    // - "For you" (items with high interest or default top 4)
-    // - "Combo" (items containing 'Combo' in name)
-    // - "Menu" (other dishes)
     const combos = foods.filter((f) => f.name.toLowerCase().includes('combo'));
-    const regularFoods = foods.filter((f) => !f.name.toLowerCase().includes('combo'));
-    const forYou = regularFoods.slice(0, 4);
-    const menu = regularFoods.slice(4).length > 0 ? regularFoods.slice(4) : regularFoods;
+    const regular = foods.filter((f) => !f.name.toLowerCase().includes('combo'));
+    const forYou = regular.slice(0, 4);
+    const menu = regular.length > 4 ? regular.slice(4) : regular;
 
     res.json({
       success: true,
-      data: {
-        all: foods,
-        sections: {
-          forYou,
-          menu,
-          combos,
-        },
-      },
+      data: { all: foods, sections: { forYou, menu, combos } },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get reviews of restaurant (Page 4 - Reviews section)
+/** GET /api/restaurants/:id/reviews */
 export const getRestaurantReviews = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const reviews = await RestaurantReview.find({ restaurantId: id })
+    const reviews = await RestaurantReview.find({ restaurantId: req.params.id })
       .populate('customerId', 'fullName avatarUrl')
       .sort({ createdAt: -1 });
 
     res.json({ success: true, count: reviews.length, data: reviews });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Add review for restaurant
-export const addRestaurantReview = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const { customerId, ratingStars, comment } = req.body;
-
-    const review = await RestaurantReview.create({
-      restaurantId: id,
-      customerId,
-      ratingStars: Number(ratingStars),
-      comment,
-    });
-
-    // Update restaurant rating average and total reviews
-    const reviews = await RestaurantReview.find({ restaurantId: id });
-    const avg = reviews.reduce((sum, r) => sum + r.ratingStars, 0) / reviews.length;
-
-    await Restaurant.findByIdAndUpdate(id, {
-      ratingAverage: Number(avg.toFixed(1)),
-      totalReviews: reviews.length,
-    });
-
-    res.status(201).json({ success: true, data: review });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
