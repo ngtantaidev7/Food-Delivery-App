@@ -23,6 +23,7 @@ import voucherRoutes from './routes/voucherRoutes';
 import orderRoutes from './routes/orderRoutes';
 import messageRoutes from './routes/messageRoutes';
 import reviewRoutes from './routes/reviewRoutes';
+import aiRoutes from './routes/aiRoutes';
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +48,7 @@ app.use('/api/vouchers', voucherRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/ai', aiRoutes);
 
 // ── Health Check ───────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
@@ -157,8 +159,8 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(() => {
-  server.listen(PORT, () => {
-    console.log(`🚀 Server running → http://localhost:${PORT}`);
+  server.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`🚀 Server running → http://0.0.0.0:${PORT}`);
   });
 });
 

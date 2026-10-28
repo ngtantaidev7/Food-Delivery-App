@@ -3,9 +3,10 @@ import { io, Socket } from 'socket.io-client';
 import Constants from 'expo-constants';
 import { Order, OrderStatus } from '@/types/order';
 
+const hostUri = Constants.expoConfig?.hostUri?.split(':')[0];
 const SOCKET_URL =
   (Constants.expoConfig?.extra?.apiUrl as string)?.replace('/api', '') ||
-  'http://localhost:5000';
+  (hostUri ? `http://${hostUri}:5000` : 'http://localhost:5000');
 
 interface DriverLocation {
   coordinates: [number, number]; // [lng, lat]

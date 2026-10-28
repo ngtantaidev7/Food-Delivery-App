@@ -3,9 +3,10 @@ import { io, Socket } from 'socket.io-client';
 import Constants from 'expo-constants';
 import { ChatMessage } from '@/types/chat';
 
+const hostUri = Constants.expoConfig?.hostUri?.split(':')[0];
 const SOCKET_URL =
   (Constants.expoConfig?.extra?.apiUrl as string)?.replace('/api', '') ||
-  'http://localhost:5000';
+  (hostUri ? `http://${hostUri}:5000` : 'http://localhost:5000');
 
 interface ChatState {
   socket: Socket | null;

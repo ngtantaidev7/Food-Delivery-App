@@ -32,7 +32,8 @@
         {
           "root": "./mobile/app"
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }

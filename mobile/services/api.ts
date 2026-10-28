@@ -1,8 +1,9 @@
 import Constants from 'expo-constants';
 
+const hostUri = Constants.expoConfig?.hostUri?.split(':')[0];
 const BASE_URL =
   (Constants.expoConfig?.extra?.apiUrl as string) ||
-  'http://localhost:5000/api';
+  (hostUri ? `http://${hostUri}:5000/api` : 'http://localhost:5000/api');
 
 type ApiResponse<T> = { success: true; data: T; count?: number } | { success: false; message: string };
 
@@ -139,3 +140,27 @@ export const uploadImage = async (
   if (!res.ok || !json.success) throw new Error(json.message ?? 'Upload failed');
   return json.data;
 };
+
+// ── AI ─────────────────────────────────────────────────────────────────────────
+export const sendAIMessage = (body: {
+  message: string;
+  userId?: string;
+  history?: { role: 'user' | 'model'; text: string }[];
+}) => request<{ reply: string; role: string }>('/ai/chat', { method: 'POST', body: JSON.stringify(body) });
+
+export const getOptimizedRoute = (body: {
+  driverLocation: { latitude: number; longitude: number };
+  restaurantLocation: { latitude: number; longitude: number };
+  customerLocation: { latitude: number; longitude: number };
+}) =>
+  request<{
+    polylineCoords: { latitude: number; longitude: number }[];
+    distanceKm: number;
+    durationMin: number;
+    etaText: string;
+    waypoints: {
+      driver: { latitude: number; longitude: number };
+      restaurant: { latitude: number; longitude: number };
+      customer: { latitude: number; longitude: number };
+    };
+  }>('/ai/route', { method: 'POST', body: JSON.stringify(body) });
